@@ -1,0 +1,133 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id        String   @id @default(uuid())
+  companyId String?
+
+  name      String
+  email     String   @unique
+  password  String
+  role      String   @default("admin")
+  status    String   @default("active")
+
+  company   Company? @relation(fields: [companyId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Company {
+  id           String   @id @default(uuid())
+  name         String
+  slug         String   @unique
+  email        String?
+  phone        String?
+  logoUrl      String?
+  primaryColor String?  @default("#885AFE")
+  status       String   @default("active")
+
+  users User[]
+  services      Service[]
+  professionals Professional[]
+  clients       Client[]
+  appointments  Appointment[]
+  businessHours BusinessHour[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Service {
+  id          String  @id @default(uuid())
+  companyId  String
+  name        String
+  description String?
+  duration    Int
+  price       Float?
+  status      String  @default("active")
+
+  company      Company       @relation(fields: [companyId], references: [id])
+  appointments Appointment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Professional {
+  id        String  @id @default(uuid())
+  companyId String
+  name      String
+  email     String?
+  phone     String?
+  status    String  @default("active")
+
+  company      Company       @relation(fields: [companyId], references: [id])
+  appointments Appointment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Client {
+  id        String  @id @default(uuid())
+  companyId String
+  name      String
+  email     String?
+  phone     String?
+
+  company      Company       @relation(fields: [companyId], references: [id])
+  appointments Appointment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model Appointment {
+  id             String @id @default(uuid())
+  companyId      String
+  serviceId      String
+  professionalId String
+  clientId       String
+
+  date      String
+  startTime String
+  endTime   String
+  status    String @default("pending")
+  notes     String?
+
+  company      Company      @relation(fields: [companyId], references: [id])
+  service      Service      @relation(fields: [serviceId], references: [id])
+  professional Professional @relation(fields: [professionalId], references: [id])
+  client       Client       @relation(fields: [clientId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model BusinessHour {
+  id        String @id @default(uuid())
+  companyId String
+
+  dayOfWeek Int
+  isOpen    Boolean @default(true)
+
+  openTime  String
+  closeTime String
+
+  breakStart String?
+  breakEnd   String?
+
+  company Company @relation(fields: [companyId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([companyId, dayOfWeek])
+}

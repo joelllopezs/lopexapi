@@ -1,0 +1,39 @@
+const express = require("express");
+const cors = require("cors");
+require("dotenv").config();
+
+const companyRoutes = require("./routes/company.routes");
+const serviceRoutes = require("./routes/service.routes");
+const professionalRoutes = require("./routes/professional.routes");
+const clientRoutes = require("./routes/client.routes");
+const appointmentRoutes = require("./routes/appointment.routes");
+const availabilityRoutes = require("./routes/availability.routes");
+const authRoutes = require("./routes/auth.routes");
+const authMiddleware = require("./middlewares/auth.middleware");
+const businessHourRoutes = require("./routes/businessHour.routes");
+
+const app = express();
+
+app.use(cors());
+app.use(express.json());
+
+app.get("/", (req, res) => {
+  return res.json({
+    message: "API Lopex Agenda rodando com sucesso",
+    version: "1.0.0"
+  });
+});
+
+app.use("/companies", authMiddleware, companyRoutes);
+app.use("/services", authMiddleware, serviceRoutes);
+app.use("/professionals", authMiddleware, professionalRoutes);
+app.use("/clients", authMiddleware, clientRoutes);
+app.use("/appointments", authMiddleware, appointmentRoutes);
+app.use("/availability", authMiddleware, availabilityRoutes);
+app.use("/business-hours", authMiddleware, businessHourRoutes);
+
+const PORT = process.env.PORT || 3333;
+
+app.listen(PORT, () => {
+  console.log(`Servidor rodando na porta ${PORT}`);
+});
