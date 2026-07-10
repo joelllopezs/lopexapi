@@ -24,6 +24,14 @@ app.get("/", (req, res) => {
   });
 });
 
+app.get("/health", (req, res) => {
+  return res.json({
+    status: "ok",
+    message: "API Lopex Agenda operacional",
+    timestamp: new Date().toISOString()
+  });
+});
+
 app.use("/companies", authMiddleware, companyRoutes);
 app.use("/services", authMiddleware, serviceRoutes);
 app.use("/professionals", authMiddleware, professionalRoutes);
