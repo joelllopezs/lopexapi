@@ -159,4 +159,101 @@ router.get("/me", authMiddleware, async (req, res) => {
   });
 });
 
+router.post("/setup-company", authMiddleware, async (req, res) => {
+  try {
+    const userId = req.user.id;
+
+    const {
+      name,
+      slug,
+      email,
+      phone,
+      logoUrl,
+      primaryColor
+    } = req.body || {};
+
+    if (!name || !slug) {
+      return res.status(400).json({
+        message: "Nome e slug da empresa são obrigatórios."
+      });
+    }
+
+    const user = await prisma.user.findUnique({
+      where: {
+        id: userId
+      }
+    });
+
+    if (!user) {
+      return res.status(404).json({
+        message: "Usuário não encontrado."
+      });
+    }
+
+    if (user.companyId) {
+      return res.status(400).json({
+        message: "Usuário já está vinculado a uma empresa."
+      });
+    }
+
+    const companyExists = await prisma.company.findUnique({
+      where: {
+        slug
+      }
+    });
+
+    if (companyExists) {
+      return res.status(400).json({
+        message: "Já existe uma empresa com esse slug."
+      });
+    }
+
+    const result = await prisma.$transaction(async (tx) => {
+      const company = await tx.company.create({
+        data: {
+          name,
+          slug,
+          email,
+          phone,
+          logoUrl,
+          primaryColor
+        }
+      });
+
+      const updatedUser = await tx.user.update({
+        where: {
+          id: userId
+        },
+        data: {
+          companyId: company.id
+        },
+        select: {
+          id: true,
+          name: true,
+          email: true,
+          role: true,
+          status: true,
+          companyId: true,
+          company: true
+        }
+      });
+
+      return {
+        company,
+        user: updatedUser
+      };
+    });
+
+    return res.status(201).json({
+      message: "Empresa criada e vinculada ao usuário com sucesso.",
+      ...result
+    });
+  } catch (error) {
+    return res.status(500).json({
+      message: "Erro ao configurar empresa.",
+      error: error.message
+    });
+  }
+});
+
 module.exports = router;

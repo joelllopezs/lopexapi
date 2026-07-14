@@ -32,6 +32,8 @@ app.get("/health", (req, res) => {
   });
 });
 
+app.use("/auth",authRoutes);
+
 app.use("/companies", authMiddleware, companyRoutes);
 app.use("/services", authMiddleware, serviceRoutes);
 app.use("/professionals", authMiddleware, professionalRoutes);
@@ -39,6 +41,7 @@ app.use("/clients", authMiddleware, clientRoutes);
 app.use("/appointments", authMiddleware, appointmentRoutes);
 app.use("/availability", authMiddleware, availabilityRoutes);
 app.use("/business-hours", authMiddleware, businessHourRoutes);
+
 
 const PORT = process.env.PORT || 3333;
 
