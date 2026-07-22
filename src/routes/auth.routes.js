@@ -367,4 +367,53 @@ router.post("/register-company", async (req, res) => {
   }
 });
 
+router.post("/make-super-admin", async (req, res) => {
+  try {
+    const { email, secret } = req.body || {};
+
+    if (secret !== process.env.ADMIN_SETUP_SECRET) {
+      return res.status(403).json({
+        message: "Chave de segurança inválida.",
+      });
+    }
+
+    if (!email) {
+      return res.status(400).json({
+        message: "E-mail é obrigatório.",
+      });
+    }
+
+    const user = await prisma.user.update({
+      where: {
+        email,
+      },
+      data: {
+        name: "LopeX Admin",
+        role: "super_admin",
+        status: "active",
+      },
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        status: true,
+      },
+    });
+
+    return res.json({
+      message: "Usuário promovido para Super Admin com sucesso.",
+      user,
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Erro ao promover usuário para Super Admin.",
+      error: error.message,
+    });
+  }
+});
+
+
 module.exports = router;
