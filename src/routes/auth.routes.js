@@ -256,4 +256,115 @@ router.post("/setup-company", authMiddleware, async (req, res) => {
   }
 });
 
+router.post("/register-company", async (req, res) => {
+  try {
+    const {
+      userName,
+      userEmail,
+      password,
+      companyName,
+      companySlug,
+      companyEmail,
+      companyPhone,
+      logoUrl,
+      primaryColor,
+    } = req.body || {};
+
+    if (!userName || !userEmail || !password || !companyName || !companySlug) {
+      return res.status(400).json({
+        message:
+          "Nome do usuário, e-mail, senha, nome da empresa e slug são obrigatórios.",
+      });
+    }
+
+    const userAlreadyExists = await prisma.user.findUnique({
+      where: {
+        email: userEmail,
+      },
+    });
+
+    if (userAlreadyExists) {
+      return res.status(400).json({
+        message: "Já existe um usuário com este e-mail.",
+      });
+    }
+
+    const companyAlreadyExists = await prisma.company.findUnique({
+      where: {
+        slug: companySlug,
+      },
+    });
+
+    if (companyAlreadyExists) {
+      return res.status(400).json({
+        message: "Já existe uma empresa com este slug.",
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const result = await prisma.$transaction(async (tx) => {
+      const company = await tx.company.create({
+        data: {
+          name: companyName,
+          slug: companySlug,
+          email: companyEmail || null,
+          phone: companyPhone || null,
+          logoUrl: logoUrl || null,
+          primaryColor: primaryColor || "#885AFE",
+          status: "active",
+        },
+      });
+
+      const user = await tx.user.create({
+        data: {
+          name: userName,
+          email: userEmail,
+          password: hashedPassword,
+          role: "company_admin",
+          status: "active",
+          companyId: company.id,
+        },
+      });
+
+      return {
+        company,
+        user,
+      };
+    });
+
+    const token = jwt.sign(
+      {
+        id: result.user.id,
+        email: result.user.email,
+        role: result.user.role,
+        companyId: result.user.companyId,
+      },
+      process.env.JWT_SECRET,
+      {
+        expiresIn: "7d",
+      }
+    );
+
+    return res.status(201).json({
+      message: "Empresa e usuário criados com sucesso.",
+      token,
+      user: {
+        id: result.user.id,
+        name: result.user.name,
+        email: result.user.email,
+        role: result.user.role,
+        companyId: result.user.companyId,
+      },
+      company: result.company,
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Erro ao cadastrar empresa.",
+    });
+  }
+});
+
 module.exports = router;
