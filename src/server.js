@@ -11,6 +11,7 @@ const availabilityRoutes = require("./routes/availability.routes");
 const authRoutes = require("./routes/auth.routes");
 const authMiddleware = require("./middlewares/auth.middleware");
 const businessHourRoutes = require("./routes/businessHour.routes");
+const adminRoutes = require("./routes/admin.routes");
 
 const app = express();
 
@@ -41,6 +42,8 @@ app.use("/clients", authMiddleware, clientRoutes);
 app.use("/appointments", authMiddleware, appointmentRoutes);
 app.use("/availability", authMiddleware, availabilityRoutes);
 app.use("/business-hours", authMiddleware, businessHourRoutes);
+
+app.use("/admin", adminRoutes);
 
 
 const PORT = process.env.PORT || 3333;
