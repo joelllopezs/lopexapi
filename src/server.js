@@ -2,6 +2,7 @@ const express = require("express");
 const cors = require("cors");
 require("dotenv").config();
 
+const publicRoutes = require("./routes/public.routes");
 const companyRoutes = require("./routes/company.routes");
 const serviceRoutes = require("./routes/service.routes");
 const professionalRoutes = require("./routes/professional.routes");
@@ -12,6 +13,7 @@ const authRoutes = require("./routes/auth.routes");
 const authMiddleware = require("./middlewares/auth.middleware");
 const businessHourRoutes = require("./routes/businessHour.routes");
 const adminRoutes = require("./routes/admin.routes");
+
 
 const app = express();
 
@@ -34,6 +36,8 @@ app.get("/health", (req, res) => {
 });
 
 app.use("/auth",authRoutes);
+
+app.use("/public", publicRoutes);
 
 app.use("/companies", authMiddleware, companyRoutes);
 app.use("/services", authMiddleware, serviceRoutes);
