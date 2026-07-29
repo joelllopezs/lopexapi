@@ -3,6 +3,9 @@ const prisma = require("../database/prisma");
 
 const router = express.Router();
 
+const COMPANY_UNAVAILABLE_MESSAGE =
+  "Esta empresa está temporariamente indisponível para agendamentos.";
+
 function timeToMinutes(time) {
   const [hours, minutes] = time.split(":").map(Number);
   return hours * 60 + minutes;
@@ -25,6 +28,44 @@ function hasConflict(slotStart, slotEnd, appointment) {
   const appointmentEnd = timeToMinutes(appointment.endTime);
 
   return slotStart < appointmentEnd && slotEnd > appointmentStart;
+}
+
+function isValidDate(date) {
+  return /^\d{4}-\d{2}-\d{2}$/.test(String(date || ""));
+}
+
+function isValidTime(time) {
+  return /^\d{2}:\d{2}$/.test(String(time || ""));
+}
+
+async function findActiveCompanyBySlug(slug) {
+  const company = await prisma.company.findUnique({
+    where: {
+      slug,
+    },
+  });
+
+  if (!company) {
+    return {
+      error: {
+        status: 404,
+        message: "Empresa não encontrada.",
+      },
+    };
+  }
+
+  if (company.status !== "active") {
+    return {
+      error: {
+        status: 403,
+        message: COMPANY_UNAVAILABLE_MESSAGE,
+      },
+    };
+  }
+
+  return {
+    company,
+  };
 }
 
 router.get("/company/:slug", async (req, res) => {
@@ -55,7 +96,7 @@ router.get("/company/:slug", async (req, res) => {
 
     if (company.status !== "active") {
       return res.status(403).json({
-        message: "Empresa indisponível para agendamentos.",
+        message: COMPANY_UNAVAILABLE_MESSAGE,
       });
     }
 
@@ -73,21 +114,11 @@ router.get("/company/:slug/services", async (req, res) => {
   try {
     const { slug } = req.params;
 
-    const company = await prisma.company.findUnique({
-      where: {
-        slug,
-      },
-    });
+    const { company, error } = await findActiveCompanyBySlug(slug);
 
-    if (!company) {
-      return res.status(404).json({
-        message: "Empresa não encontrada.",
-      });
-    }
-
-    if (company.status !== "active") {
-      return res.status(403).json({
-        message: "Empresa indisponível para agendamentos.",
+    if (error) {
+      return res.status(error.status).json({
+        message: error.message,
       });
     }
 
@@ -115,21 +146,11 @@ router.get("/company/:slug/professionals", async (req, res) => {
   try {
     const { slug } = req.params;
 
-    const company = await prisma.company.findUnique({
-      where: {
-        slug,
-      },
-    });
+    const { company, error } = await findActiveCompanyBySlug(slug);
 
-    if (!company) {
-      return res.status(404).json({
-        message: "Empresa não encontrada.",
-      });
-    }
-
-    if (company.status !== "active") {
-      return res.status(403).json({
-        message: "Empresa indisponível para agendamentos.",
+    if (error) {
+      return res.status(error.status).json({
+        message: error.message,
       });
     }
 
@@ -164,27 +185,23 @@ router.get("/company/:slug/availability", async (req, res) => {
       });
     }
 
-    const company = await prisma.company.findUnique({
-      where: {
-        slug,
-      },
-    });
-
-    if (!company) {
-      return res.status(404).json({
-        message: "Empresa não encontrada.",
+    if (!isValidDate(date)) {
+      return res.status(400).json({
+        message: "Data inválida. Use o formato YYYY-MM-DD.",
       });
     }
 
-    if (company.status !== "active") {
-      return res.status(403).json({
-        message: "Empresa indisponível para agendamentos.",
+    const { company, error } = await findActiveCompanyBySlug(slug);
+
+    if (error) {
+      return res.status(error.status).json({
+        message: error.message,
       });
     }
 
     const service = await prisma.service.findFirst({
       where: {
-        id: professionalId ? serviceId : undefined,
+        id: serviceId,
         companyId: company.id,
         status: "active",
       },
@@ -224,6 +241,7 @@ router.get("/company/:slug/availability", async (req, res) => {
     if (!businessHour || !businessHour.isOpen) {
       return res.json({
         isOpen: false,
+        message: "Empresa fechada nesta data.",
         availableTimes: [],
       });
     }
@@ -326,21 +344,29 @@ router.post("/company/:slug/appointments", async (req, res) => {
       });
     }
 
-    const company = await prisma.company.findUnique({
-      where: {
-        slug,
-      },
-    });
-
-    if (!company) {
-      return res.status(404).json({
-        message: "Empresa não encontrada.",
+    if (!isValidDate(date)) {
+      return res.status(400).json({
+        message: "Data inválida. Use o formato YYYY-MM-DD.",
       });
     }
 
-    if (company.status !== "active") {
-      return res.status(403).json({
-        message: "Empresa indisponível para agendamentos.",
+    if (!isValidTime(startTime) || !isValidTime(endTime)) {
+      return res.status(400).json({
+        message: "Horário inválido. Use o formato HH:mm.",
+      });
+    }
+
+    if (timeToMinutes(startTime) >= timeToMinutes(endTime)) {
+      return res.status(400).json({
+        message: "O horário inicial precisa ser menor que o horário final.",
+      });
+    }
+
+    const { company, error } = await findActiveCompanyBySlug(slug);
+
+    if (error) {
+      return res.status(error.status).json({
+        message: error.message,
       });
     }
 
@@ -380,16 +406,12 @@ router.post("/company/:slug/appointments", async (req, res) => {
         status: {
           not: "cancelled",
         },
-        OR: [
-          {
-            startTime: {
-              lt: endTime,
-            },
-            endTime: {
-              gt: startTime,
-            },
-          },
-        ],
+        startTime: {
+          lt: endTime,
+        },
+        endTime: {
+          gt: startTime,
+        },
       },
     });
 
@@ -403,9 +425,9 @@ router.post("/company/:slug/appointments", async (req, res) => {
       const client = await tx.client.create({
         data: {
           companyId: company.id,
-          name: clientName,
-          email: clientEmail || null,
-          phone: clientPhone || null,
+          name: String(clientName).trim(),
+          email: clientEmail ? String(clientEmail).trim().toLowerCase() : null,
+          phone: clientPhone ? String(clientPhone).trim() : null,
         },
       });
 
@@ -419,7 +441,7 @@ router.post("/company/:slug/appointments", async (req, res) => {
           startTime,
           endTime,
           status: "pending",
-          notes: notes || null,
+          notes: notes ? String(notes).trim() : null,
         },
         include: {
           service: true,
