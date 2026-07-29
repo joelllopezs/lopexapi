@@ -6,56 +6,157 @@ const authMiddleware = require("../middlewares/auth.middleware");
 
 const router = express.Router();
 
+function generateSlug(value) {
+  return String(value || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/(^-|-$)+/g, "");
+}
+
+function onlyNumbers(value) {
+  return String(value || "").replace(/\D/g, "");
+}
+
+function isValidEmail(email) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(email || ""));
+}
+
+function isValidPhone(phone) {
+  const numbers = onlyNumbers(phone);
+
+  return numbers.length === 10 || numbers.length === 11;
+}
+
+function isValidSlug(slug) {
+  return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(String(slug || ""));
+}
+
+function normalizeEmail(email) {
+  if (!email) return null;
+
+  return String(email).trim().toLowerCase();
+}
+
+function normalizeText(value) {
+  return String(value || "").trim();
+}
+
+function validateUserData({ name, email, password }) {
+  if (!name || name.length < 3) {
+    return "O nome precisa ter pelo menos 3 caracteres.";
+  }
+
+  if (!email) {
+    return "Informe o e-mail.";
+  }
+
+  if (!isValidEmail(email)) {
+    return "Informe um e-mail válido.";
+  }
+
+  if (!password) {
+    return "Informe a senha.";
+  }
+
+  if (password.length < 6) {
+    return "A senha precisa ter pelo menos 6 caracteres.";
+  }
+
+  return null;
+}
+
+function validateCompanyData({
+  companyName,
+  companySlug,
+  companyEmail,
+  companyPhone,
+}) {
+  if (!companyName || companyName.length < 3) {
+    return "O nome da empresa precisa ter pelo menos 3 caracteres.";
+  }
+
+  if (!companySlug) {
+    return "Informe o slug da empresa.";
+  }
+
+  if (companySlug.length < 3) {
+    return "O slug precisa ter pelo menos 3 caracteres.";
+  }
+
+  if (!isValidSlug(companySlug)) {
+    return "O slug deve conter apenas letras minúsculas, números e hífen.";
+  }
+
+  if (companyEmail && !isValidEmail(companyEmail)) {
+    return "Informe um e-mail da empresa válido.";
+  }
+
+  if (!companyPhone) {
+    return "Informe o telefone/WhatsApp da empresa.";
+  }
+
+  if (!isValidPhone(companyPhone)) {
+    return "Informe um telefone válido com DDD. Exemplo: (14) 99999-9999.";
+  }
+
+  return null;
+}
+
 router.post("/register", async (req, res) => {
   try {
-    const { name, email, password, companyId } = req.body || {};
+    const name = normalizeText(req.body?.name);
+    const email = normalizeEmail(req.body?.email);
+    const password = String(req.body?.password || "");
+    const companyId = req.body?.companyId || null;
 
-    if (!name || !email || !password) {
-      return res.status(400).json({
-        message: "Nome, e-mail e senha são obrigatórios."
-      });
-    }
+    const validationError = validateUserData({
+      name,
+      email,
+      password,
+    });
 
-    if (password.length < 6) {
+    if (validationError) {
       return res.status(400).json({
-        message: "A senha precisa ter pelo menos 6 caracteres."
+        message: validationError,
       });
     }
 
     const userExists = await prisma.user.findUnique({
       where: {
-        email
-      }
+        email,
+      },
     });
 
     if (userExists) {
       return res.status(400).json({
-        message: "Já existe um usuário com esse e-mail."
+        message: "Já existe um usuário com esse e-mail.",
       });
     }
 
     if (companyId) {
       const companyExists = await prisma.company.findUnique({
         where: {
-          id: companyId
-        }
+          id: companyId,
+        },
       });
 
       if (!companyExists) {
         return res.status(404).json({
-          message: "Empresa não encontrada."
+          message: "Empresa não encontrada.",
         });
       }
     }
 
-    const hashedPassword = await bcrypt.hash(password, 8);
+    const hashedPassword = await bcrypt.hash(password, 10);
 
     const user = await prisma.user.create({
       data: {
         name,
         email,
         password: hashedPassword,
-        companyId
+        companyId,
       },
       select: {
         id: true,
@@ -64,44 +165,53 @@ router.post("/register", async (req, res) => {
         role: true,
         status: true,
         companyId: true,
-        createdAt: true
-      }
+        createdAt: true,
+      },
     });
 
     return res.status(201).json({
       message: "Usuário criado com sucesso.",
-      user
+      user,
     });
   } catch (error) {
+    console.error(error);
+
     return res.status(500).json({
       message: "Erro ao cadastrar usuário.",
-      error: error.message
+      error: error.message,
     });
   }
 });
 
 router.post("/login", async (req, res) => {
   try {
-    const { email, password } = req.body || {};
+    const email = normalizeEmail(req.body?.email);
+    const password = String(req.body?.password || "");
 
     if (!email || !password) {
       return res.status(400).json({
-        message: "E-mail e senha são obrigatórios."
+        message: "E-mail e senha são obrigatórios.",
+      });
+    }
+
+    if (!isValidEmail(email)) {
+      return res.status(400).json({
+        message: "Informe um e-mail válido.",
       });
     }
 
     const user = await prisma.user.findUnique({
       where: {
-        email
+        email,
       },
       include: {
-        company: true
-      }
+        company: true,
+      },
     });
 
     if (!user) {
       return res.status(401).json({
-        message: "E-mail ou senha inválidos."
+        message: "E-mail ou senha inválidos.",
       });
     }
 
@@ -109,13 +219,19 @@ router.post("/login", async (req, res) => {
 
     if (!passwordMatch) {
       return res.status(401).json({
-        message: "E-mail ou senha inválidos."
+        message: "E-mail ou senha inválidos.",
       });
     }
 
     if (user.status !== "active") {
       return res.status(403).json({
-        message: "Usuário inativo."
+        message: "Usuário inativo.",
+      });
+    }
+
+    if (user.company && user.company.status !== "active") {
+      return res.status(403).json({
+        message: "Empresa inativa.",
       });
     }
 
@@ -124,11 +240,11 @@ router.post("/login", async (req, res) => {
         id: user.id,
         email: user.email,
         role: user.role,
-        companyId: user.companyId
+        companyId: user.companyId,
       },
       process.env.JWT_SECRET,
       {
-        expiresIn: "7d"
+        expiresIn: "7d",
       }
     );
 
@@ -142,20 +258,22 @@ router.post("/login", async (req, res) => {
         role: user.role,
         status: user.status,
         companyId: user.companyId,
-        company: user.company
-      }
+        company: user.company,
+      },
     });
   } catch (error) {
+    console.error(error);
+
     return res.status(500).json({
       message: "Erro ao fazer login.",
-      error: error.message
+      error: error.message,
     });
   }
 });
 
 router.get("/me", authMiddleware, async (req, res) => {
   return res.json({
-    user: req.user
+    user: req.user,
   });
 });
 
@@ -163,48 +281,53 @@ router.post("/setup-company", authMiddleware, async (req, res) => {
   try {
     const userId = req.user.id;
 
-    const {
-      name,
-      slug,
-      email,
-      phone,
-      logoUrl,
-      primaryColor
-    } = req.body || {};
+    const name = normalizeText(req.body?.name);
+    const slug = generateSlug(req.body?.slug);
+    const email = normalizeEmail(req.body?.email);
+    const phone = normalizeText(req.body?.phone);
+    const logoUrl = normalizeText(req.body?.logoUrl) || null;
+    const primaryColor = normalizeText(req.body?.primaryColor) || "#885AFE";
 
-    if (!name || !slug) {
+    const companyValidationError = validateCompanyData({
+      companyName: name,
+      companySlug: slug,
+      companyEmail: email,
+      companyPhone: phone,
+    });
+
+    if (companyValidationError) {
       return res.status(400).json({
-        message: "Nome e slug da empresa são obrigatórios."
+        message: companyValidationError,
       });
     }
 
     const user = await prisma.user.findUnique({
       where: {
-        id: userId
-      }
+        id: userId,
+      },
     });
 
     if (!user) {
       return res.status(404).json({
-        message: "Usuário não encontrado."
+        message: "Usuário não encontrado.",
       });
     }
 
     if (user.companyId) {
       return res.status(400).json({
-        message: "Usuário já está vinculado a uma empresa."
+        message: "Usuário já está vinculado a uma empresa.",
       });
     }
 
     const companyExists = await prisma.company.findUnique({
       where: {
-        slug
-      }
+        slug,
+      },
     });
 
     if (companyExists) {
       return res.status(400).json({
-        message: "Já existe uma empresa com esse slug."
+        message: "Já existe uma empresa com esse slug.",
       });
     }
 
@@ -216,16 +339,17 @@ router.post("/setup-company", authMiddleware, async (req, res) => {
           email,
           phone,
           logoUrl,
-          primaryColor
-        }
+          primaryColor,
+          status: "active",
+        },
       });
 
       const updatedUser = await tx.user.update({
         where: {
-          id: userId
+          id: userId,
         },
         data: {
-          companyId: company.id
+          companyId: company.id,
         },
         select: {
           id: true,
@@ -234,46 +358,65 @@ router.post("/setup-company", authMiddleware, async (req, res) => {
           role: true,
           status: true,
           companyId: true,
-          company: true
-        }
+          company: true,
+        },
       });
 
       return {
         company,
-        user: updatedUser
+        user: updatedUser,
       };
     });
 
     return res.status(201).json({
       message: "Empresa criada e vinculada ao usuário com sucesso.",
-      ...result
+      ...result,
     });
   } catch (error) {
+    console.error(error);
+
     return res.status(500).json({
       message: "Erro ao configurar empresa.",
-      error: error.message
+      error: error.message,
     });
   }
 });
 
 router.post("/register-company", async (req, res) => {
   try {
-    const {
-      userName,
-      userEmail,
+    const userName = normalizeText(req.body?.userName);
+    const userEmail = normalizeEmail(req.body?.userEmail);
+    const password = String(req.body?.password || "");
+
+    const companyName = normalizeText(req.body?.companyName);
+    const companySlug = generateSlug(req.body?.companySlug);
+    const companyEmail = normalizeEmail(req.body?.companyEmail);
+    const companyPhone = normalizeText(req.body?.companyPhone);
+    const logoUrl = normalizeText(req.body?.logoUrl) || null;
+    const primaryColor = normalizeText(req.body?.primaryColor) || "#885AFE";
+
+    const userValidationError = validateUserData({
+      name: userName,
+      email: userEmail,
       password,
+    });
+
+    if (userValidationError) {
+      return res.status(400).json({
+        message: userValidationError,
+      });
+    }
+
+    const companyValidationError = validateCompanyData({
       companyName,
       companySlug,
       companyEmail,
       companyPhone,
-      logoUrl,
-      primaryColor,
-    } = req.body || {};
+    });
 
-    if (!userName || !userEmail || !password || !companyName || !companySlug) {
+    if (companyValidationError) {
       return res.status(400).json({
-        message:
-          "Nome do usuário, e-mail, senha, nome da empresa e slug são obrigatórios.",
+        message: companyValidationError,
       });
     }
 
@@ -308,10 +451,10 @@ router.post("/register-company", async (req, res) => {
         data: {
           name: companyName,
           slug: companySlug,
-          email: companyEmail || null,
-          phone: companyPhone || null,
-          logoUrl: logoUrl || null,
-          primaryColor: primaryColor || "#885AFE",
+          email: companyEmail,
+          phone: companyPhone,
+          logoUrl,
+          primaryColor,
           status: "active",
         },
       });
@@ -354,6 +497,7 @@ router.post("/register-company", async (req, res) => {
         name: result.user.name,
         email: result.user.email,
         role: result.user.role,
+        status: result.user.status,
         companyId: result.user.companyId,
       },
       company: result.company,
@@ -363,7 +507,9 @@ router.post("/register-company", async (req, res) => {
 
     return res.status(500).json({
       message: "Erro ao cadastrar empresa.",
+      error: error.message,
     });
   }
 });
+
 module.exports = router;
