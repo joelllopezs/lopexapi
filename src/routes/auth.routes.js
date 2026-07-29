@@ -229,9 +229,13 @@ router.post("/login", async (req, res) => {
       });
     }
 
-    if (user.company && user.company.status !== "active") {
+    if (
+      user.role !== "super_admin" &&
+      user.company &&
+      user.company.status !== "active"
+    ) {
       return res.status(403).json({
-        message: "Empresa inativa.",
+        message: "Empresa inativa. Aguarde a liberação do Admin Master.",
       });
     }
 
@@ -334,10 +338,10 @@ router.post("/setup-company", authMiddleware, async (req, res) => {
     const result = await prisma.$transaction(async (tx) => {
       const company = await tx.company.create({
         data: {
-          name: companyName,
-          slug: companySlug,
-          email: companyEmail,
-          phone: companyPhone,
+          name,
+          slug,
+          email,
+          phone,
           logoUrl,
           primaryColor,
           status: "inactive",
@@ -455,7 +459,7 @@ router.post("/register-company", async (req, res) => {
           phone: companyPhone,
           logoUrl,
           primaryColor,
-          status: "active",
+          status: "inactive",
         },
       });
 
@@ -476,22 +480,9 @@ router.post("/register-company", async (req, res) => {
       };
     });
 
-    const token = jwt.sign(
-      {
-        id: result.user.id,
-        email: result.user.email,
-        role: result.user.role,
-        companyId: result.user.companyId,
-      },
-      process.env.JWT_SECRET,
-      {
-        expiresIn: "7d",
-      }
-    );
-
     return res.status(201).json({
-      message: "Empresa e usuário criados com sucesso.",
-      token,
+      message:
+        "Empresa e usuário criados com sucesso. Aguarde a liberação do Admin Master.",
       user: {
         id: result.user.id,
         name: result.user.name,
