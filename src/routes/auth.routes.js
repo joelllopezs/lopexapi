@@ -334,13 +334,13 @@ router.post("/setup-company", authMiddleware, async (req, res) => {
     const result = await prisma.$transaction(async (tx) => {
       const company = await tx.company.create({
         data: {
-          name,
-          slug,
-          email,
-          phone,
+          name: companyName,
+          slug: companySlug,
+          email: companyEmail,
+          phone: companyPhone,
           logoUrl,
           primaryColor,
-          status: "active",
+          status: "inactive",
         },
       });
 
