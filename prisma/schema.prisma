@@ -32,6 +32,7 @@ model Company {
   logoUrl      String?
   primaryColor String? @default("#885AFE")
   status       String  @default("active")
+  plan         String  @default("start")
 
   users         User[]
   services      Service[]
