@@ -6,6 +6,8 @@ const authMiddleware = require("../middlewares/auth.middleware");
 
 const router = express.Router();
 
+const VALID_COMPANY_PLANS = ["start", "pro", "premium"];
+
 function generateSlug(value) {
   return String(value || "")
     .toLowerCase()
@@ -33,6 +35,10 @@ function isValidSlug(slug) {
   return /^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(String(slug || ""));
 }
 
+function isValidCompanyPlan(plan) {
+  return VALID_COMPANY_PLANS.includes(plan);
+}
+
 function normalizeEmail(email) {
   if (!email) return null;
 
@@ -41,6 +47,16 @@ function normalizeEmail(email) {
 
 function normalizeText(value) {
   return String(value || "").trim();
+}
+
+function normalizeCompanyPlan(plan) {
+  const normalizedPlan = normalizeText(plan).toLowerCase();
+
+  if (!normalizedPlan) {
+    return "start";
+  }
+
+  return normalizedPlan;
 }
 
 function validateUserData({ name, email, password }) {
@@ -291,6 +307,13 @@ router.post("/setup-company", authMiddleware, async (req, res) => {
     const phone = normalizeText(req.body?.phone);
     const logoUrl = normalizeText(req.body?.logoUrl) || null;
     const primaryColor = normalizeText(req.body?.primaryColor) || "#885AFE";
+    const plan = normalizeCompanyPlan(req.body?.plan);
+
+    if (!isValidCompanyPlan(plan)) {
+      return res.status(400).json({
+        message: "Plano inválido. Use start, pro ou premium.",
+      });
+    }
 
     const companyValidationError = validateCompanyData({
       companyName: name,
@@ -345,6 +368,7 @@ router.post("/setup-company", authMiddleware, async (req, res) => {
           logoUrl,
           primaryColor,
           status: "inactive",
+          plan,
         },
       });
 
@@ -398,6 +422,13 @@ router.post("/register-company", async (req, res) => {
     const companyPhone = normalizeText(req.body?.companyPhone);
     const logoUrl = normalizeText(req.body?.logoUrl) || null;
     const primaryColor = normalizeText(req.body?.primaryColor) || "#885AFE";
+    const plan = normalizeCompanyPlan(req.body?.plan);
+
+    if (!isValidCompanyPlan(plan)) {
+      return res.status(400).json({
+        message: "Plano inválido. Use start, pro ou premium.",
+      });
+    }
 
     const userValidationError = validateUserData({
       name: userName,
@@ -460,6 +491,7 @@ router.post("/register-company", async (req, res) => {
           logoUrl,
           primaryColor,
           status: "inactive",
+          plan,
         },
       });
 
