@@ -5,6 +5,21 @@ const router = express.Router();
 
 const VALID_STATUS = ["active", "inactive"];
 
+const PLAN_LIMITS = {
+  start: {
+    label: "Start",
+    professionals: 2,
+  },
+  pro: {
+    label: "Pro",
+    professionals: 5,
+  },
+  premium: {
+    label: "Premium",
+    professionals: 15,
+  },
+};
+
 function getCompanyId(req) {
   return req.user?.companyId;
 }
@@ -22,6 +37,63 @@ function isValidEmail(email) {
 
   const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
   return emailRegex.test(email);
+}
+
+function getPlanConfig(plan) {
+  return PLAN_LIMITS[plan] || PLAN_LIMITS.start;
+}
+
+async function validateProfessionalLimit(companyId) {
+  const company = await prisma.company.findUnique({
+    where: {
+      id: companyId,
+    },
+    select: {
+      id: true,
+      name: true,
+      plan: true,
+      _count: {
+        select: {
+          professionals: {
+            where: {
+              status: "active",
+            },
+          },
+        },
+      },
+    },
+  });
+
+  if (!company) {
+    return {
+      allowed: false,
+      status: 404,
+      message: "Empresa não encontrada.",
+    };
+  }
+
+  const planConfig = getPlanConfig(company.plan);
+  const currentActiveProfessionals = company._count.professionals;
+
+  if (currentActiveProfessionals >= planConfig.professionals) {
+    return {
+      allowed: false,
+      status: 403,
+      message: `Limite do plano atingido. O plano ${planConfig.label} permite até ${planConfig.professionals} profissionais ativos.`,
+      details: {
+        plan: company.plan || "start",
+        planLabel: planConfig.label,
+        limit: planConfig.professionals,
+        current: currentActiveProfessionals,
+      },
+    };
+  }
+
+  return {
+    allowed: true,
+    company,
+    planConfig,
+  };
 }
 
 router.post("/", async (req, res) => {
@@ -48,6 +120,15 @@ router.post("/", async (req, res) => {
     if (!isValidEmail(normalizedEmail)) {
       return res.status(400).json({
         message: "E-mail inválido.",
+      });
+    }
+
+    const planValidation = await validateProfessionalLimit(companyId);
+
+    if (!planValidation.allowed) {
+      return res.status(planValidation.status || 403).json({
+        message: planValidation.message,
+        details: planValidation.details,
       });
     }
 
@@ -105,6 +186,8 @@ router.post("/", async (req, res) => {
 
     return res.status(201).json(professional);
   } catch (error) {
+    console.error(error);
+
     return res.status(500).json({
       message: "Erro ao criar profissional.",
       error: error.message,
@@ -173,6 +256,8 @@ router.get("/", async (req, res) => {
 
     return res.json(professionals);
   } catch (error) {
+    console.error(error);
+
     return res.status(500).json({
       message: "Erro ao listar profissionais.",
       error: error.message,
@@ -229,6 +314,8 @@ router.get("/:id", async (req, res) => {
 
     return res.json(professional);
   } catch (error) {
+    console.error(error);
+
     return res.status(500).json({
       message: "Erro ao buscar profissional.",
       error: error.message,
@@ -285,6 +372,20 @@ router.put("/:id", async (req, res) => {
       return res.status(400).json({
         message: `Status inválido. Use: ${VALID_STATUS.join(", ")}.`,
       });
+    }
+
+    if (
+      professionalExists.status !== "active" &&
+      nextStatus === "active"
+    ) {
+      const planValidation = await validateProfessionalLimit(companyId);
+
+      if (!planValidation.allowed) {
+        return res.status(planValidation.status || 403).json({
+          message: planValidation.message,
+          details: planValidation.details,
+        });
+      }
     }
 
     const duplicatedName = await prisma.professional.findFirst({
@@ -349,6 +450,8 @@ router.put("/:id", async (req, res) => {
 
     return res.json(professional);
   } catch (error) {
+    console.error(error);
+
     return res.status(500).json({
       message: "Erro ao atualizar profissional.",
       error: error.message,
@@ -393,6 +496,20 @@ router.patch("/:id/status", async (req, res) => {
       });
     }
 
+    if (
+      professionalExists.status !== "active" &&
+      status === "active"
+    ) {
+      const planValidation = await validateProfessionalLimit(companyId);
+
+      if (!planValidation.allowed) {
+        return res.status(planValidation.status || 403).json({
+          message: planValidation.message,
+          details: planValidation.details,
+        });
+      }
+    }
+
     const professional = await prisma.professional.update({
       where: {
         id,
@@ -412,6 +529,8 @@ router.patch("/:id/status", async (req, res) => {
 
     return res.json(professional);
   } catch (error) {
+    console.error(error);
+
     return res.status(500).json({
       message: "Erro ao atualizar status do profissional.",
       error: error.message,
@@ -477,6 +596,8 @@ router.delete("/:id", async (req, res) => {
       message: "Profissional excluído com sucesso.",
     });
   } catch (error) {
+    console.error(error);
+
     return res.status(500).json({
       message: "Erro ao excluir profissional.",
       error: error.message,
