@@ -10,6 +10,7 @@ router.use(superAdminMiddleware);
 
 const VALID_COMPANY_STATUS = ["active", "inactive"];
 const VALID_COMPANY_PLANS = ["start", "pro", "premium"];
+const VALID_SUBSCRIPTION_STATUS = ["trial", "active", "overdue", "cancelled"];
 
 function isValidCompanyStatus(status) {
   return VALID_COMPANY_STATUS.includes(status);
@@ -17,6 +18,10 @@ function isValidCompanyStatus(status) {
 
 function isValidCompanyPlan(plan) {
   return VALID_COMPANY_PLANS.includes(plan);
+}
+
+function isValidSubscriptionStatus(status) {
+  return VALID_SUBSCRIPTION_STATUS.includes(status);
 }
 
 function getPlanLabel(plan) {
@@ -27,6 +32,17 @@ function getPlanLabel(plan) {
   };
 
   return labels[plan] || "Start";
+}
+
+function getSubscriptionLabel(status) {
+  const labels = {
+    trial: "Teste gratuito",
+    active: "Ativa",
+    overdue: "Atrasada",
+    cancelled: "Cancelada",
+  };
+
+  return labels[status] || "Teste gratuito";
 }
 
 function getPlanLimits(plan) {
@@ -58,6 +74,22 @@ function getPlanLimits(plan) {
   };
 
   return limits[plan] || limits.start;
+}
+
+function parseOptionalDate(value) {
+  if (value === undefined) return undefined;
+
+  if (value === null || value === "") {
+    return null;
+  }
+
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return "invalid";
+  }
+
+  return date;
 }
 
 function buildCompanyInclude() {
@@ -95,6 +127,9 @@ function formatCompanyWithPlan(company) {
     ...company,
     planLabel: getPlanLabel(company.plan || "start"),
     planLimits: getPlanLimits(company.plan || "start"),
+    subscriptionLabel: getSubscriptionLabel(
+      company.subscriptionStatus || "trial"
+    ),
   };
 }
 
@@ -138,6 +173,10 @@ router.get("/summary", async (req, res) => {
       startCompanies,
       proCompanies,
       premiumCompanies,
+      trialCompanies,
+      activeSubscriptions,
+      overdueSubscriptions,
+      cancelledSubscriptions,
       users,
       services,
       professionals,
@@ -180,6 +219,30 @@ router.get("/summary", async (req, res) => {
         },
       }),
 
+      prisma.company.count({
+        where: {
+          subscriptionStatus: "trial",
+        },
+      }),
+
+      prisma.company.count({
+        where: {
+          subscriptionStatus: "active",
+        },
+      }),
+
+      prisma.company.count({
+        where: {
+          subscriptionStatus: "overdue",
+        },
+      }),
+
+      prisma.company.count({
+        where: {
+          subscriptionStatus: "cancelled",
+        },
+      }),
+
       prisma.user.count(),
       prisma.service.count(),
       prisma.professional.count(),
@@ -219,6 +282,10 @@ router.get("/summary", async (req, res) => {
       startCompanies,
       proCompanies,
       premiumCompanies,
+      trialCompanies,
+      activeSubscriptions,
+      overdueSubscriptions,
+      cancelledSubscriptions,
       users,
       services,
       professionals,
@@ -476,6 +543,87 @@ router.patch("/companies/:id/plan", async (req, res) => {
   }
 });
 
+router.patch("/companies/:id/subscription", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const {
+      subscriptionStatus,
+      subscriptionStart,
+      subscriptionEnd,
+      trialEndsAt,
+    } = req.body || {};
+
+    if (!isValidSubscriptionStatus(subscriptionStatus)) {
+      return res.status(400).json({
+        message: "Assinatura inválida. Use trial, active, overdue ou cancelled.",
+      });
+    }
+
+    const parsedSubscriptionStart = parseOptionalDate(subscriptionStart);
+    const parsedSubscriptionEnd = parseOptionalDate(subscriptionEnd);
+    const parsedTrialEndsAt = parseOptionalDate(trialEndsAt);
+
+    if (
+      parsedSubscriptionStart === "invalid" ||
+      parsedSubscriptionEnd === "invalid" ||
+      parsedTrialEndsAt === "invalid"
+    ) {
+      return res.status(400).json({
+        message: "Uma ou mais datas da assinatura são inválidas.",
+      });
+    }
+
+    const companyExists = await prisma.company.findUnique({
+      where: {
+        id,
+      },
+    });
+
+    if (!companyExists) {
+      return res.status(404).json({
+        message: "Empresa não encontrada.",
+      });
+    }
+
+    const data = {
+      subscriptionStatus,
+    };
+
+    if (parsedSubscriptionStart !== undefined) {
+      data.subscriptionStart = parsedSubscriptionStart;
+    }
+
+    if (parsedSubscriptionEnd !== undefined) {
+      data.subscriptionEnd = parsedSubscriptionEnd;
+    }
+
+    if (parsedTrialEndsAt !== undefined) {
+      data.trialEndsAt = parsedTrialEndsAt;
+    }
+
+    const company = await prisma.company.update({
+      where: {
+        id,
+      },
+      data,
+      include: buildCompanyInclude(),
+    });
+
+    return res.json({
+      message: `Assinatura alterada para ${getSubscriptionLabel(
+        subscriptionStatus
+      )} com sucesso.`,
+      company: formatCompanyWithPlan(company),
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Erro ao atualizar assinatura da empresa.",
+    });
+  }
+});
+
 router.patch("/companies/:id/activate", async (req, res) => {
   try {
     const { id } = req.params;
@@ -658,6 +806,10 @@ router.delete("/companies/:id", async (req, res) => {
         slug: company.slug,
         plan: company.plan || "start",
         planLabel: getPlanLabel(company.plan || "start"),
+        subscriptionStatus: company.subscriptionStatus || "trial",
+        subscriptionLabel: getSubscriptionLabel(
+          company.subscriptionStatus || "trial"
+        ),
         counts: company._count,
       },
     });
