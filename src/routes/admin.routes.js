@@ -8,9 +8,126 @@ const router = express.Router();
 router.use(authMiddleware);
 router.use(superAdminMiddleware);
 
+const VALID_COMPANY_STATUS = ["active", "inactive"];
+const VALID_COMPANY_PLANS = ["start", "pro", "premium"];
+
 function isValidCompanyStatus(status) {
-  return ["active", "inactive"].includes(status);
+  return VALID_COMPANY_STATUS.includes(status);
 }
+
+function isValidCompanyPlan(plan) {
+  return VALID_COMPANY_PLANS.includes(plan);
+}
+
+function getPlanLabel(plan) {
+  const labels = {
+    start: "Start",
+    pro: "Pro",
+    premium: "Premium",
+  };
+
+  return labels[plan] || "Start";
+}
+
+function getPlanLimits(plan) {
+  const limits = {
+    start: {
+      professionals: 2,
+      services: null,
+      clients: null,
+      appointments: null,
+      publicBooking: true,
+      publicCancel: true,
+    },
+    pro: {
+      professionals: 5,
+      services: null,
+      clients: null,
+      appointments: null,
+      publicBooking: true,
+      publicCancel: true,
+    },
+    premium: {
+      professionals: 15,
+      services: null,
+      clients: null,
+      appointments: null,
+      publicBooking: true,
+      publicCancel: true,
+    },
+  };
+
+  return limits[plan] || limits.start;
+}
+
+function buildCompanyInclude() {
+  return {
+    users: {
+      select: {
+        id: true,
+        name: true,
+        email: true,
+        role: true,
+        status: true,
+        createdAt: true,
+      },
+      orderBy: {
+        createdAt: "asc",
+      },
+    },
+    _count: {
+      select: {
+        users: true,
+        services: true,
+        professionals: true,
+        clients: true,
+        appointments: true,
+        businessHours: true,
+      },
+    },
+  };
+}
+
+function formatCompanyWithPlan(company) {
+  if (!company) return company;
+
+  return {
+    ...company,
+    planLabel: getPlanLabel(company.plan || "start"),
+    planLimits: getPlanLimits(company.plan || "start"),
+  };
+}
+
+router.get("/plans", async (req, res) => {
+  try {
+    return res.json([
+      {
+        id: "start",
+        name: "Start",
+        description: "Plano inicial para empresas pequenas.",
+        limits: getPlanLimits("start"),
+      },
+      {
+        id: "pro",
+        name: "Pro",
+        description: "Plano para equipes em crescimento.",
+        limits: getPlanLimits("pro"),
+      },
+      {
+        id: "premium",
+        name: "Premium",
+        description: "Plano avançado para empresas maiores.",
+        limits: getPlanLimits("premium"),
+      },
+    ]);
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Erro ao carregar planos.",
+    });
+  }
+});
 
 router.get("/summary", async (req, res) => {
   try {
@@ -18,6 +135,9 @@ router.get("/summary", async (req, res) => {
       companies,
       activeCompanies,
       inactiveCompanies,
+      startCompanies,
+      proCompanies,
+      premiumCompanies,
       users,
       services,
       professionals,
@@ -39,6 +159,24 @@ router.get("/summary", async (req, res) => {
       prisma.company.count({
         where: {
           status: "inactive",
+        },
+      }),
+
+      prisma.company.count({
+        where: {
+          plan: "start",
+        },
+      }),
+
+      prisma.company.count({
+        where: {
+          plan: "pro",
+        },
+      }),
+
+      prisma.company.count({
+        where: {
+          plan: "premium",
         },
       }),
 
@@ -78,6 +216,9 @@ router.get("/summary", async (req, res) => {
       activeCompanies,
       inactiveCompanies,
       blockedCompanies: inactiveCompanies,
+      startCompanies,
+      proCompanies,
+      premiumCompanies,
       users,
       services,
       professionals,
@@ -103,34 +244,10 @@ router.get("/companies", async (req, res) => {
       orderBy: {
         createdAt: "desc",
       },
-      include: {
-        users: {
-          select: {
-            id: true,
-            name: true,
-            email: true,
-            role: true,
-            status: true,
-            createdAt: true,
-          },
-          orderBy: {
-            createdAt: "asc",
-          },
-        },
-        _count: {
-          select: {
-            users: true,
-            services: true,
-            professionals: true,
-            clients: true,
-            appointments: true,
-            businessHours: true,
-          },
-        },
-      },
+      include: buildCompanyInclude(),
     });
 
-    return res.json(companies);
+    return res.json(companies.map(formatCompanyWithPlan));
   } catch (error) {
     console.error(error);
 
@@ -234,7 +351,7 @@ router.get("/companies/:id", async (req, res) => {
       });
     }
 
-    return res.json(company);
+    return res.json(formatCompanyWithPlan(company));
   } catch (error) {
     console.error(error);
 
@@ -274,18 +391,7 @@ router.patch("/companies/:id/status", async (req, res) => {
       data: {
         status,
       },
-      include: {
-        _count: {
-          select: {
-            users: true,
-            services: true,
-            professionals: true,
-            clients: true,
-            appointments: true,
-            businessHours: true,
-          },
-        },
-      },
+      include: buildCompanyInclude(),
     });
 
     return res.json({
@@ -293,13 +399,79 @@ router.patch("/companies/:id/status", async (req, res) => {
         status === "active"
           ? "Empresa ativada com sucesso."
           : "Empresa bloqueada com sucesso.",
-      company,
+      company: formatCompanyWithPlan(company),
     });
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
       message: "Erro ao atualizar status da empresa.",
+    });
+  }
+});
+
+router.patch("/companies/:id/plan", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { plan } = req.body || {};
+
+    if (!isValidCompanyPlan(plan)) {
+      return res.status(400).json({
+        message: "Plano inválido. Use start, pro ou premium.",
+      });
+    }
+
+    const companyExists = await prisma.company.findUnique({
+      where: {
+        id,
+      },
+      include: {
+        _count: {
+          select: {
+            professionals: true,
+          },
+        },
+      },
+    });
+
+    if (!companyExists) {
+      return res.status(404).json({
+        message: "Empresa não encontrada.",
+      });
+    }
+
+    const planLimits = getPlanLimits(plan);
+
+    if (
+      planLimits.professionals !== null &&
+      companyExists._count.professionals > planLimits.professionals
+    ) {
+      return res.status(400).json({
+        message: `Esta empresa possui ${companyExists._count.professionals} profissionais. O plano ${getPlanLabel(
+          plan
+        )} permite até ${planLimits.professionals}.`,
+      });
+    }
+
+    const company = await prisma.company.update({
+      where: {
+        id,
+      },
+      data: {
+        plan,
+      },
+      include: buildCompanyInclude(),
+    });
+
+    return res.json({
+      message: `Plano alterado para ${getPlanLabel(plan)} com sucesso.`,
+      company: formatCompanyWithPlan(company),
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Erro ao atualizar plano da empresa.",
     });
   }
 });
@@ -327,11 +499,12 @@ router.patch("/companies/:id/activate", async (req, res) => {
       data: {
         status: "active",
       },
+      include: buildCompanyInclude(),
     });
 
     return res.json({
       message: "Empresa ativada com sucesso.",
-      company,
+      company: formatCompanyWithPlan(company),
     });
   } catch (error) {
     console.error(error);
@@ -365,11 +538,12 @@ router.patch("/companies/:id/block", async (req, res) => {
       data: {
         status: "inactive",
       },
+      include: buildCompanyInclude(),
     });
 
     return res.json({
       message: "Empresa bloqueada com sucesso.",
-      company,
+      company: formatCompanyWithPlan(company),
     });
   } catch (error) {
     console.error(error);
@@ -482,6 +656,8 @@ router.delete("/companies/:id", async (req, res) => {
         id: company.id,
         name: company.name,
         slug: company.slug,
+        plan: company.plan || "start",
+        planLabel: getPlanLabel(company.plan || "start"),
         counts: company._count,
       },
     });
