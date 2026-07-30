@@ -7,6 +7,7 @@ const authMiddleware = require("../middlewares/auth.middleware");
 const router = express.Router();
 
 const VALID_COMPANY_PLANS = ["start", "pro", "premium"];
+const TRIAL_DAYS = 7;
 
 function generateSlug(value) {
   return String(value || "")
@@ -57,6 +58,24 @@ function normalizeCompanyPlan(plan) {
   }
 
   return normalizedPlan;
+}
+
+function addDays(date, days) {
+  const result = new Date(date);
+  result.setDate(result.getDate() + days);
+  return result;
+}
+
+function createTrialDates() {
+  const now = new Date();
+  const trialEndsAt = addDays(now, TRIAL_DAYS);
+
+  return {
+    subscriptionStatus: "trial",
+    subscriptionStart: now,
+    subscriptionEnd: trialEndsAt,
+    trialEndsAt,
+  };
 }
 
 function validateUserData({ name, email, password }) {
@@ -358,6 +377,8 @@ router.post("/setup-company", authMiddleware, async (req, res) => {
       });
     }
 
+    const trialData = createTrialDates();
+
     const result = await prisma.$transaction(async (tx) => {
       const company = await tx.company.create({
         data: {
@@ -369,6 +390,7 @@ router.post("/setup-company", authMiddleware, async (req, res) => {
           primaryColor,
           status: "inactive",
           plan,
+          ...trialData,
         },
       });
 
@@ -480,6 +502,7 @@ router.post("/register-company", async (req, res) => {
     }
 
     const hashedPassword = await bcrypt.hash(password, 10);
+    const trialData = createTrialDates();
 
     const result = await prisma.$transaction(async (tx) => {
       const company = await tx.company.create({
@@ -492,6 +515,7 @@ router.post("/register-company", async (req, res) => {
           primaryColor,
           status: "inactive",
           plan,
+          ...trialData,
         },
       });
 
