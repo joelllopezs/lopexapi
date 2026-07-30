@@ -1,10 +1,17 @@
 const express = require("express");
+const crypto = require("crypto");
 const prisma = require("../database/prisma");
 
 const router = express.Router();
 
 const COMPANY_UNAVAILABLE_MESSAGE =
   "Esta empresa está temporariamente indisponível para agendamentos.";
+
+const PUBLIC_CANCEL_LIMIT_HOURS = 2;
+
+function generateCancelToken() {
+  return crypto.randomBytes(32).toString("hex");
+}
 
 function timeToMinutes(time) {
   const [hours, minutes] = time.split(":").map(Number);
@@ -36,6 +43,40 @@ function isValidDate(date) {
 
 function isValidTime(time) {
   return /^\d{2}:\d{2}$/.test(String(time || ""));
+}
+
+function getAppointmentDateTime(date, time) {
+  return new Date(`${date}T${time}:00`);
+}
+
+function canCancelAppointment(date, startTime) {
+  const appointmentDateTime = getAppointmentDateTime(date, startTime);
+  const now = new Date();
+
+  const diffInMilliseconds = appointmentDateTime.getTime() - now.getTime();
+  const diffInHours = diffInMilliseconds / (1000 * 60 * 60);
+
+  return diffInHours >= PUBLIC_CANCEL_LIMIT_HOURS;
+}
+
+function buildCancelPath(appointmentId, cancelToken) {
+  return `/agendar/cancelar/${appointmentId}/${cancelToken}`;
+}
+
+function buildCancelUrl(req, appointmentId, cancelToken) {
+  const frontendUrl = process.env.FRONTEND_URL;
+
+  if (frontendUrl) {
+    return `${frontendUrl}${buildCancelPath(appointmentId, cancelToken)}`;
+  }
+
+  const origin = req.get("origin");
+
+  if (origin) {
+    return `${origin}${buildCancelPath(appointmentId, cancelToken)}`;
+  }
+
+  return buildCancelPath(appointmentId, cancelToken);
 }
 
 async function findActiveCompanyBySlug(slug) {
@@ -421,6 +462,8 @@ router.post("/company/:slug/appointments", async (req, res) => {
       });
     }
 
+    const cancelToken = generateCancelToken();
+
     const result = await prisma.$transaction(async (tx) => {
       const client = await tx.client.create({
         data: {
@@ -442,6 +485,7 @@ router.post("/company/:slug/appointments", async (req, res) => {
           endTime,
           status: "pending",
           notes: notes ? String(notes).trim() : null,
+          cancelToken,
         },
         include: {
           service: true,
@@ -457,12 +501,146 @@ router.post("/company/:slug/appointments", async (req, res) => {
     return res.status(201).json({
       message: "Agendamento criado com sucesso.",
       appointment: result,
+      cancelPath: buildCancelPath(result.id, cancelToken),
+      cancelUrl: buildCancelUrl(req, result.id, cancelToken),
     });
   } catch (error) {
     console.error(error);
 
     return res.status(500).json({
       message: "Erro ao criar agendamento.",
+    });
+  }
+});
+
+router.get("/appointments/:id/cancel/:cancelToken", async (req, res) => {
+  try {
+    const { id, cancelToken } = req.params;
+
+    const appointment = await prisma.appointment.findUnique({
+      where: {
+        id,
+      },
+      include: {
+        company: {
+          select: {
+            id: true,
+            name: true,
+            slug: true,
+            status: true,
+            logoUrl: true,
+            primaryColor: true,
+          },
+        },
+        service: true,
+        professional: true,
+        client: true,
+      },
+    });
+
+    if (!appointment || appointment.cancelToken !== cancelToken) {
+      return res.status(404).json({
+        message: "Agendamento não encontrado ou link inválido.",
+      });
+    }
+
+    return res.json({
+      appointment: {
+        id: appointment.id,
+        date: appointment.date,
+        startTime: appointment.startTime,
+        endTime: appointment.endTime,
+        status: appointment.status,
+        cancelledAt: appointment.cancelledAt,
+        canCancel:
+          appointment.status !== "cancelled" &&
+          canCancelAppointment(appointment.date, appointment.startTime),
+        company: appointment.company,
+        service: appointment.service,
+        professional: appointment.professional,
+        client: appointment.client,
+      },
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Erro ao buscar agendamento.",
+    });
+  }
+});
+
+router.post("/appointments/:id/cancel/:cancelToken", async (req, res) => {
+  try {
+    const { id, cancelToken } = req.params;
+
+    const appointment = await prisma.appointment.findUnique({
+      where: {
+        id,
+      },
+      include: {
+        company: true,
+        service: true,
+        professional: true,
+        client: true,
+      },
+    });
+
+    if (!appointment || appointment.cancelToken !== cancelToken) {
+      return res.status(404).json({
+        message: "Agendamento não encontrado ou link inválido.",
+      });
+    }
+
+    if (appointment.company.status !== "active") {
+      return res.status(403).json({
+        message: COMPANY_UNAVAILABLE_MESSAGE,
+      });
+    }
+
+    if (appointment.status === "cancelled") {
+      return res.status(400).json({
+        message: "Este agendamento já está cancelado.",
+      });
+    }
+
+    if (appointment.status === "completed") {
+      return res.status(400).json({
+        message: "Este agendamento já foi concluído e não pode ser cancelado.",
+      });
+    }
+
+    if (!canCancelAppointment(appointment.date, appointment.startTime)) {
+      return res.status(400).json({
+        message: `O cancelamento online só é permitido até ${PUBLIC_CANCEL_LIMIT_HOURS} horas antes do horário.`,
+      });
+    }
+
+    const updatedAppointment = await prisma.appointment.update({
+      where: {
+        id,
+      },
+      data: {
+        status: "cancelled",
+        cancelledAt: new Date(),
+      },
+      include: {
+        company: true,
+        service: true,
+        professional: true,
+        client: true,
+      },
+    });
+
+    return res.json({
+      message: "Agendamento cancelado com sucesso.",
+      appointment: updatedAppointment,
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Erro ao cancelar agendamento.",
     });
   }
 });

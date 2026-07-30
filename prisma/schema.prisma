@@ -8,32 +8,32 @@ datasource db {
 }
 
 model User {
-  id        String   @id @default(uuid())
+  id        String  @id @default(uuid())
   companyId String?
 
-  name      String
-  email     String   @unique
-  password  String
-  role      String   @default("admin")
-  status    String   @default("active")
+  name     String
+  email    String @unique
+  password String
+  role     String @default("admin")
+  status   String @default("active")
 
-  company   Company? @relation(fields: [companyId], references: [id])
+  company Company? @relation(fields: [companyId], references: [id])
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
 
 model Company {
-  id           String   @id @default(uuid())
+  id           String  @id @default(uuid())
   name         String
-  slug         String   @unique
+  slug         String  @unique
   email        String?
   phone        String?
   logoUrl      String?
-  primaryColor String?  @default("#885AFE")
-  status       String   @default("active")
+  primaryColor String? @default("#885AFE")
+  status       String  @default("active")
 
-  users User[]
+  users         User[]
   services      Service[]
   professionals Professional[]
   clients       Client[]
@@ -99,8 +99,11 @@ model Appointment {
   date      String
   startTime String
   endTime   String
-  status    String @default("pending")
+  status    String  @default("pending")
   notes     String?
+
+  cancelToken String?   @unique
+  cancelledAt DateTime?
 
   company      Company      @relation(fields: [companyId], references: [id])
   service      Service      @relation(fields: [serviceId], references: [id])
