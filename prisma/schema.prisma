@@ -34,6 +34,11 @@ model Company {
   status       String  @default("active")
   plan         String  @default("start")
 
+  subscriptionStatus String    @default("trial")
+  subscriptionStart  DateTime?
+  subscriptionEnd    DateTime?
+  trialEndsAt        DateTime?
+
   users         User[]
   services      Service[]
   professionals Professional[]
