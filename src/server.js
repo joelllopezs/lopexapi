@@ -16,6 +16,7 @@ const businessHourRoutes = require("./routes/businessHour.routes");
 const adminRoutes = require("./routes/admin.routes");
 const auditLogRoutes = require("./routes/auditLog.routes");
 const reportRoutes = require("./routes/report.routes");
+const docsRoutes = require("./routes/docs.routes");
 
 const app = express();
 
@@ -26,6 +27,8 @@ app.get("/", (req, res) => {
   return res.json({
     message: "API Lopex Agenda rodando com sucesso",
     version: "1.0.0",
+    docs: "/docs",
+    health: "/health",
   });
 });
 
@@ -36,6 +39,8 @@ app.get("/health", (req, res) => {
     timestamp: new Date().toISOString(),
   });
 });
+
+app.use("/docs", docsRoutes);
 
 app.use("/auth", authRoutes);
 app.use("/public", publicRoutes);
