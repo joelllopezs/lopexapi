@@ -11,9 +11,9 @@ const appointmentRoutes = require("./routes/appointment.routes");
 const availabilityRoutes = require("./routes/availability.routes");
 const authRoutes = require("./routes/auth.routes");
 const authMiddleware = require("./middlewares/auth.middleware");
+const subscriptionMiddleware = require("./middlewares/subscription.middleware");
 const businessHourRoutes = require("./routes/businessHour.routes");
 const adminRoutes = require("./routes/admin.routes");
-
 
 const app = express();
 
@@ -23,7 +23,7 @@ app.use(express.json());
 app.get("/", (req, res) => {
   return res.json({
     message: "API Lopex Agenda rodando com sucesso",
-    version: "1.0.0"
+    version: "1.0.0",
   });
 });
 
@@ -31,24 +31,59 @@ app.get("/health", (req, res) => {
   return res.json({
     status: "ok",
     message: "API Lopex Agenda operacional",
-    timestamp: new Date().toISOString()
+    timestamp: new Date().toISOString(),
   });
 });
 
-app.use("/auth",authRoutes);
+app.use("/auth", authRoutes);
 
 app.use("/public", publicRoutes);
 
 app.use("/companies", authMiddleware, companyRoutes);
-app.use("/services", authMiddleware, serviceRoutes);
-app.use("/professionals", authMiddleware, professionalRoutes);
-app.use("/clients", authMiddleware, clientRoutes);
-app.use("/appointments", authMiddleware, appointmentRoutes);
-app.use("/availability", authMiddleware, availabilityRoutes);
-app.use("/business-hours", authMiddleware, businessHourRoutes);
+
+app.use(
+  "/services",
+  authMiddleware,
+  subscriptionMiddleware,
+  serviceRoutes
+);
+
+app.use(
+  "/professionals",
+  authMiddleware,
+  subscriptionMiddleware,
+  professionalRoutes
+);
+
+app.use(
+  "/clients",
+  authMiddleware,
+  subscriptionMiddleware,
+  clientRoutes
+);
+
+app.use(
+  "/appointments",
+  authMiddleware,
+  subscriptionMiddleware,
+  appointmentRoutes
+);
+
+app.use(
+  "/availability",
+  authMiddleware,
+  subscriptionMiddleware,
+  availabilityRoutes
+);
+
+app.use(
+  "/business-hours",
+  authMiddleware,
+  subscriptionMiddleware,
+  businessHourRoutes
+);
 
 app.use("/admin", adminRoutes);
-
 
 const PORT = process.env.PORT || 3333;
 
