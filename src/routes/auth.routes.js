@@ -7,6 +7,8 @@ const authMiddleware = require("../middlewares/auth.middleware");
 const router = express.Router();
 
 const VALID_COMPANY_PLANS = ["start", "pro", "premium"];
+const VALID_DOCUMENT_TYPES = ["cpf", "cnpj"];
+const VALID_SERVICE_MODES = ["local", "home", "online", "whatsapp"];
 const TRIAL_DAYS = 7;
 
 function generateSlug(value) {
@@ -40,6 +42,73 @@ function isValidCompanyPlan(plan) {
   return VALID_COMPANY_PLANS.includes(plan);
 }
 
+function isValidCpf(cpf) {
+  const numbers = onlyNumbers(cpf);
+
+  if (numbers.length !== 11) return false;
+  if (/^(\d)\1+$/.test(numbers)) return false;
+
+  let sum = 0;
+
+  for (let i = 0; i < 9; i += 1) {
+    sum += Number(numbers.charAt(i)) * (10 - i);
+  }
+
+  let digit = 11 - (sum % 11);
+
+  if (digit >= 10) {
+    digit = 0;
+  }
+
+  if (digit !== Number(numbers.charAt(9))) {
+    return false;
+  }
+
+  sum = 0;
+
+  for (let i = 0; i < 10; i += 1) {
+    sum += Number(numbers.charAt(i)) * (11 - i);
+  }
+
+  digit = 11 - (sum % 11);
+
+  if (digit >= 10) {
+    digit = 0;
+  }
+
+  return digit === Number(numbers.charAt(10));
+}
+
+function isValidCnpj(cnpj) {
+  const numbers = onlyNumbers(cnpj);
+
+  if (numbers.length !== 14) return false;
+  if (/^(\d)\1+$/.test(numbers)) return false;
+
+  const calcDigit = (base, weights) => {
+    const sum = base
+      .split("")
+      .reduce((total, digit, index) => total + Number(digit) * weights[index], 0);
+
+    const rest = sum % 11;
+
+    return rest < 2 ? 0 : 11 - rest;
+  };
+
+  const firstDigit = calcDigit(numbers.slice(0, 12), [
+    5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2,
+  ]);
+
+  const secondDigit = calcDigit(numbers.slice(0, 13), [
+    6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2,
+  ]);
+
+  return (
+    firstDigit === Number(numbers.charAt(12)) &&
+    secondDigit === Number(numbers.charAt(13))
+  );
+}
+
 function normalizeEmail(email) {
   if (!email) return null;
 
@@ -58,6 +127,30 @@ function normalizeCompanyPlan(plan) {
   }
 
   return normalizedPlan;
+}
+
+function normalizeDocumentType(value) {
+  const documentType = normalizeText(value).toLowerCase();
+
+  if (!documentType) {
+    return "cpf";
+  }
+
+  return documentType;
+}
+
+function normalizeServiceMode(value) {
+  const serviceMode = normalizeText(value).toLowerCase();
+
+  if (!serviceMode) {
+    return "whatsapp";
+  }
+
+  return serviceMode;
+}
+
+function normalizeState(value) {
+  return normalizeText(value).toUpperCase();
 }
 
 function addDays(date, days) {
@@ -107,6 +200,15 @@ function validateCompanyData({
   companySlug,
   companyEmail,
   companyPhone,
+  document,
+  documentType,
+  serviceMode,
+  zipCode,
+  street,
+  number,
+  neighborhood,
+  city,
+  state,
 }) {
   if (!companyName || companyName.length < 3) {
     return "O nome da empresa precisa ter pelo menos 3 caracteres.";
@@ -136,7 +238,97 @@ function validateCompanyData({
     return "Informe um telefone válido com DDD. Exemplo: (14) 99999-9999.";
   }
 
+  if (!document) {
+    return "Informe o CPF do responsável.";
+  }
+
+  if (!VALID_DOCUMENT_TYPES.includes(documentType)) {
+    return "Tipo de documento inválido. Use cpf ou cnpj.";
+  }
+
+  if (documentType === "cpf" && !isValidCpf(document)) {
+    return "Informe um CPF válido.";
+  }
+
+  if (documentType === "cnpj" && !isValidCnpj(document)) {
+    return "Informe um CNPJ válido.";
+  }
+
+  if (!serviceMode) {
+    return "Informe o tipo de atendimento.";
+  }
+
+  if (!VALID_SERVICE_MODES.includes(serviceMode)) {
+    return "Tipo de atendimento inválido. Use local, home, online ou whatsapp.";
+  }
+
+  if (!city) {
+    return "Informe a cidade.";
+  }
+
+  if (!state) {
+    return "Informe o estado.";
+  }
+
+  if (serviceMode === "local") {
+    if (!zipCode) {
+      return "Informe o CEP para atendimento em local físico.";
+    }
+
+    if (!street) {
+      return "Informe a rua para atendimento em local físico.";
+    }
+
+    if (!number) {
+      return "Informe o número para atendimento em local físico.";
+    }
+
+    if (!neighborhood) {
+      return "Informe o bairro para atendimento em local físico.";
+    }
+  }
+
   return null;
+}
+
+function buildCompanyFieldsFromBody(body, prefix = "") {
+  const getValue = (name) => {
+    const prefixedName =
+      prefix && name.charAt(0).toUpperCase() + name.slice(1);
+
+    if (prefix && body?.[`${prefix}${prefixedName}`] !== undefined) {
+      return body[`${prefix}${prefixedName}`];
+    }
+
+    return body?.[name];
+  };
+
+  const documentType = normalizeDocumentType(
+    getValue("documentType") || body?.companyDocumentType
+  );
+
+  const document = onlyNumbers(
+    getValue("document") || body?.companyDocument || body?.responsibleCpf
+  );
+
+  const serviceMode = normalizeServiceMode(
+    getValue("serviceMode") || body?.companyServiceMode
+  );
+
+  return {
+    document,
+    documentType,
+    serviceMode,
+    zipCode: normalizeText(getValue("zipCode") || body?.companyZipCode),
+    street: normalizeText(getValue("street") || body?.companyStreet),
+    number: normalizeText(getValue("number") || body?.companyNumber),
+    neighborhood: normalizeText(
+      getValue("neighborhood") || body?.companyNeighborhood
+    ),
+    complement: normalizeText(getValue("complement") || body?.companyComplement),
+    city: normalizeText(getValue("city") || body?.companyCity),
+    state: normalizeState(getValue("state") || body?.companyState),
+  };
 }
 
 router.post("/register", async (req, res) => {
@@ -327,6 +519,7 @@ router.post("/setup-company", authMiddleware, async (req, res) => {
     const logoUrl = normalizeText(req.body?.logoUrl) || null;
     const primaryColor = normalizeText(req.body?.primaryColor) || "#885AFE";
     const plan = normalizeCompanyPlan(req.body?.plan);
+    const companyFields = buildCompanyFieldsFromBody(req.body);
 
     if (!isValidCompanyPlan(plan)) {
       return res.status(400).json({
@@ -339,6 +532,7 @@ router.post("/setup-company", authMiddleware, async (req, res) => {
       companySlug: slug,
       companyEmail: email,
       companyPhone: phone,
+      ...companyFields,
     });
 
     if (companyValidationError) {
@@ -390,6 +584,12 @@ router.post("/setup-company", authMiddleware, async (req, res) => {
           primaryColor,
           status: "inactive",
           plan,
+          ...companyFields,
+          zipCode: companyFields.zipCode || null,
+          street: companyFields.street || null,
+          number: companyFields.number || null,
+          neighborhood: companyFields.neighborhood || null,
+          complement: companyFields.complement || null,
           ...trialData,
         },
       });
@@ -445,6 +645,7 @@ router.post("/register-company", async (req, res) => {
     const logoUrl = normalizeText(req.body?.logoUrl) || null;
     const primaryColor = normalizeText(req.body?.primaryColor) || "#885AFE";
     const plan = normalizeCompanyPlan(req.body?.plan);
+    const companyFields = buildCompanyFieldsFromBody(req.body, "company");
 
     if (!isValidCompanyPlan(plan)) {
       return res.status(400).json({
@@ -469,6 +670,7 @@ router.post("/register-company", async (req, res) => {
       companySlug,
       companyEmail,
       companyPhone,
+      ...companyFields,
     });
 
     if (companyValidationError) {
@@ -515,6 +717,12 @@ router.post("/register-company", async (req, res) => {
           primaryColor,
           status: "inactive",
           plan,
+          ...companyFields,
+          zipCode: companyFields.zipCode || null,
+          street: companyFields.street || null,
+          number: companyFields.number || null,
+          neighborhood: companyFields.neighborhood || null,
+          complement: companyFields.complement || null,
           ...trialData,
         },
       });

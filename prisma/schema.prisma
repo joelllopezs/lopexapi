@@ -36,6 +36,19 @@ model Company {
   status       String  @default("active")
   plan         String  @default("start")
 
+  document     String?
+  documentType String? @default("cpf")
+
+  serviceMode String? @default("whatsapp")
+
+  zipCode      String?
+  street       String?
+  number       String?
+  neighborhood String?
+  complement   String?
+  city         String?
+  state        String?
+
   subscriptionStatus String    @default("trial")
   subscriptionStart  DateTime?
   subscriptionEnd    DateTime?
