@@ -19,6 +19,8 @@ model User {
 
   company Company? @relation(fields: [companyId], references: [id])
 
+  auditLogs AuditLog[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 }
@@ -45,6 +47,7 @@ model Company {
   clients       Client[]
   appointments  Appointment[]
   businessHours BusinessHour[]
+  auditLogs     AuditLog[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -139,4 +142,31 @@ model BusinessHour {
   updatedAt DateTime @updatedAt
 
   @@unique([companyId, dayOfWeek])
+}
+
+model AuditLog {
+  id        String  @id @default(uuid())
+  companyId String?
+  userId    String?
+
+  action      String
+  entity      String
+  entityId    String?
+  description String
+
+  metadata Json?
+
+  ip        String?
+  userAgent String?
+
+  company Company? @relation(fields: [companyId], references: [id])
+  user    User?    @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@index([companyId])
+  @@index([userId])
+  @@index([action])
+  @@index([entity])
+  @@index([createdAt])
 }
