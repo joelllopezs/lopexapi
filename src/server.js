@@ -14,6 +14,7 @@ const authMiddleware = require("./middlewares/auth.middleware");
 const subscriptionMiddleware = require("./middlewares/subscription.middleware");
 const businessHourRoutes = require("./routes/businessHour.routes");
 const adminRoutes = require("./routes/admin.routes");
+const auditLogRoutes = require("./routes/auditLog.routes");
 
 const app = express();
 
@@ -36,7 +37,6 @@ app.get("/health", (req, res) => {
 });
 
 app.use("/auth", authRoutes);
-
 app.use("/public", publicRoutes);
 
 app.use("/companies", authMiddleware, companyRoutes);
@@ -84,6 +84,7 @@ app.use(
 );
 
 app.use("/admin", adminRoutes);
+app.use("/audit-logs", auditLogRoutes);
 
 const PORT = process.env.PORT || 3333;
 

@@ -2,6 +2,7 @@ const express = require("express");
 const prisma = require("../database/prisma");
 const authMiddleware = require("../middlewares/auth.middleware");
 const superAdminMiddleware = require("../middlewares/superAdmin.middleware");
+const { createAuditLog } = require("../utils/auditLog");
 
 const router = express.Router();
 
@@ -167,6 +168,27 @@ async function findCompanyOrFail(id) {
   });
 
   return company;
+}
+
+async function logAdminAction({
+  req,
+  company,
+  action,
+  entity = "company",
+  entityId = null,
+  description,
+  metadata = null,
+}) {
+  return createAuditLog({
+    req,
+    companyId: company?.id || null,
+    userId: req.user?.id || null,
+    action,
+    entity,
+    entityId: entityId || company?.id || null,
+    description,
+    metadata,
+  });
 }
 
 router.get("/plans", async (req, res) => {
@@ -493,6 +515,20 @@ router.patch("/companies/:id/status", async (req, res) => {
       include: buildCompanyInclude(),
     });
 
+    await logAdminAction({
+      req,
+      company,
+      action: status === "active" ? "company_activated" : "company_blocked",
+      description:
+        status === "active"
+          ? `Empresa ${company.name} foi ativada pelo Admin Master.`
+          : `Empresa ${company.name} foi bloqueada pelo Admin Master.`,
+      metadata: {
+        previousStatus: companyExists.status,
+        newStatus: status,
+      },
+    });
+
     return res.json({
       message:
         status === "active"
@@ -560,6 +596,19 @@ router.patch("/companies/:id/plan", async (req, res) => {
         plan,
       },
       include: buildCompanyInclude(),
+    });
+
+    await logAdminAction({
+      req,
+      company,
+      action: "company_plan_changed",
+      description: `Plano da empresa ${company.name} alterado de ${getPlanLabel(
+        companyExists.plan || "start"
+      )} para ${getPlanLabel(plan)}.`,
+      metadata: {
+        previousPlan: companyExists.plan || "start",
+        newPlan: plan,
+      },
     });
 
     return res.json({
@@ -637,6 +686,22 @@ router.patch("/companies/:id/subscription", async (req, res) => {
       include: buildCompanyInclude(),
     });
 
+    await logAdminAction({
+      req,
+      company,
+      action: "company_subscription_changed",
+      description: `Assinatura da empresa ${company.name} alterada para ${getSubscriptionLabel(
+        subscriptionStatus
+      )}.`,
+      metadata: {
+        previousSubscriptionStatus: companyExists.subscriptionStatus || "trial",
+        newSubscriptionStatus: subscriptionStatus,
+        subscriptionStart: data.subscriptionStart || null,
+        subscriptionEnd: data.subscriptionEnd || null,
+        trialEndsAt: data.trialEndsAt || null,
+      },
+    });
+
     return res.json({
       message: `Assinatura alterada para ${getSubscriptionLabel(
         subscriptionStatus
@@ -685,6 +750,18 @@ router.patch("/companies/:id/subscription/renew", async (req, res) => {
         subscriptionEnd: newEndDate,
       },
       include: buildCompanyInclude(),
+    });
+
+    await logAdminAction({
+      req,
+      company,
+      action: "company_subscription_renewed",
+      description: `Assinatura da empresa ${company.name} renovada por mais ${days} dias.`,
+      metadata: {
+        days,
+        previousSubscriptionEnd: companyExists.subscriptionEnd,
+        newSubscriptionEnd: newEndDate,
+      },
     });
 
     return res.json({
@@ -746,6 +823,18 @@ router.patch("/companies/:id/subscription/extend-trial", async (req, res) => {
       include: buildCompanyInclude(),
     });
 
+    await logAdminAction({
+      req,
+      company,
+      action: "company_trial_extended",
+      description: `Trial da empresa ${company.name} estendido por mais ${days} dias.`,
+      metadata: {
+        days,
+        previousTrialEndsAt: companyExists.trialEndsAt,
+        newTrialEndsAt: newTrialEnd,
+      },
+    });
+
     return res.json({
       message: `Trial estendido por mais ${days} dias com sucesso.`,
       company: formatCompanyWithPlan(company),
@@ -790,6 +879,18 @@ router.patch("/companies/:id/subscription/mark-active", async (req, res) => {
       include: buildCompanyInclude(),
     });
 
+    await logAdminAction({
+      req,
+      company,
+      action: "company_subscription_marked_active",
+      description: `Assinatura da empresa ${company.name} foi marcada como ativa.`,
+      metadata: {
+        previousSubscriptionStatus: companyExists.subscriptionStatus || "trial",
+        newSubscriptionStatus: "active",
+        subscriptionEnd,
+      },
+    });
+
     return res.json({
       message: "Assinatura marcada como ativa com sucesso.",
       company: formatCompanyWithPlan(company),
@@ -824,6 +925,17 @@ router.patch("/companies/:id/subscription/mark-overdue", async (req, res) => {
         subscriptionStatus: "overdue",
       },
       include: buildCompanyInclude(),
+    });
+
+    await logAdminAction({
+      req,
+      company,
+      action: "company_subscription_marked_overdue",
+      description: `Assinatura da empresa ${company.name} foi marcada como atrasada.`,
+      metadata: {
+        previousSubscriptionStatus: companyExists.subscriptionStatus || "trial",
+        newSubscriptionStatus: "overdue",
+      },
     });
 
     return res.json({
@@ -874,6 +986,21 @@ router.patch("/companies/:id/subscription/reactivate", async (req, res) => {
       include: buildCompanyInclude(),
     });
 
+    await logAdminAction({
+      req,
+      company,
+      action: "company_reactivated",
+      description: `Empresa ${company.name} foi reativada com assinatura ativa por ${days} dias.`,
+      metadata: {
+        days,
+        previousStatus: companyExists.status,
+        previousSubscriptionStatus: companyExists.subscriptionStatus || "trial",
+        newStatus: "active",
+        newSubscriptionStatus: "active",
+        subscriptionEnd,
+      },
+    });
+
     return res.json({
       message: `Empresa reativada com assinatura ativa por ${days} dias.`,
       company: formatCompanyWithPlan(company),
@@ -910,6 +1037,17 @@ router.patch("/companies/:id/activate", async (req, res) => {
       include: buildCompanyInclude(),
     });
 
+    await logAdminAction({
+      req,
+      company,
+      action: "company_activated",
+      description: `Empresa ${company.name} foi ativada pelo Admin Master.`,
+      metadata: {
+        previousStatus: companyExists.status,
+        newStatus: "active",
+      },
+    });
+
     return res.json({
       message: "Empresa ativada com sucesso.",
       company: formatCompanyWithPlan(company),
@@ -943,6 +1081,17 @@ router.patch("/companies/:id/block", async (req, res) => {
         status: "inactive",
       },
       include: buildCompanyInclude(),
+    });
+
+    await logAdminAction({
+      req,
+      company,
+      action: "company_blocked",
+      description: `Empresa ${company.name} foi bloqueada pelo Admin Master.`,
+      metadata: {
+        previousStatus: companyExists.status,
+        newStatus: "inactive",
+      },
     });
 
     return res.json({
@@ -1011,6 +1160,32 @@ router.delete("/companies/:id", async (req, res) => {
     }
 
     await prisma.$transaction(async (tx) => {
+      await tx.auditLog.create({
+        data: {
+          companyId: null,
+          userId: req.user?.id || null,
+          action: "company_deleted",
+          entity: "company",
+          entityId: company.id,
+          description: `Empresa ${company.name} foi excluída permanentemente pelo Admin Master.`,
+          metadata: {
+            deletedCompany: {
+              id: company.id,
+              name: company.name,
+              slug: company.slug,
+              plan: company.plan || "start",
+              subscriptionStatus: company.subscriptionStatus || "trial",
+              counts: company._count,
+            },
+          },
+          ip:
+            req.headers?.["x-forwarded-for"]?.split(",")[0]?.trim() ||
+            req.socket?.remoteAddress ||
+            null,
+          userAgent: req.headers?.["user-agent"] || null,
+        },
+      });
+
       await tx.appointment.deleteMany({
         where: {
           companyId: id,
