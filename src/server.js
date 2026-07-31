@@ -15,6 +15,7 @@ const subscriptionMiddleware = require("./middlewares/subscription.middleware");
 const businessHourRoutes = require("./routes/businessHour.routes");
 const adminRoutes = require("./routes/admin.routes");
 const auditLogRoutes = require("./routes/auditLog.routes");
+const reportRoutes = require("./routes/report.routes");
 
 const app = express();
 
@@ -85,6 +86,7 @@ app.use(
 
 app.use("/admin", adminRoutes);
 app.use("/audit-logs", auditLogRoutes);
+app.use("/reports", authMiddleware, reportRoutes);
 
 const PORT = process.env.PORT || 3333;
 
