@@ -7,6 +7,9 @@ const router = express.Router();
 const COMPANY_UNAVAILABLE_MESSAGE =
   "Esta empresa está temporariamente indisponível para agendamentos.";
 
+const SUBSCRIPTION_UNAVAILABLE_MESSAGE =
+  "Esta empresa está temporariamente indisponível para agendamentos. Tente novamente mais tarde.";
+
 const PUBLIC_CANCEL_LIMIT_HOURS = 2;
 
 function generateCancelToken() {
@@ -59,6 +62,47 @@ function canCancelAppointment(date, startTime) {
   return diffInHours >= PUBLIC_CANCEL_LIMIT_HOURS;
 }
 
+function isDateExpired(value) {
+  if (!value) return false;
+
+  const today = new Date();
+  const date = new Date(value);
+
+  if (Number.isNaN(date.getTime())) {
+    return false;
+  }
+
+  today.setHours(0, 0, 0, 0);
+  date.setHours(0, 0, 0, 0);
+
+  return date < today;
+}
+
+function isCompanySubscriptionAvailable(company) {
+  const subscriptionStatus = company.subscriptionStatus || "trial";
+
+  if (subscriptionStatus === "cancelled") {
+    return false;
+  }
+
+  if (subscriptionStatus === "overdue") {
+    return false;
+  }
+
+  if (subscriptionStatus === "trial" && isDateExpired(company.trialEndsAt)) {
+    return false;
+  }
+
+  if (
+    subscriptionStatus === "active" &&
+    isDateExpired(company.subscriptionEnd)
+  ) {
+    return false;
+  }
+
+  return true;
+}
+
 function buildCancelPath(appointmentId, cancelToken) {
   return `/agendar/cancelar/${appointmentId}/${cancelToken}`;
 }
@@ -104,6 +148,15 @@ async function findActiveCompanyBySlug(slug) {
     };
   }
 
+  if (!isCompanySubscriptionAvailable(company)) {
+    return {
+      error: {
+        status: 403,
+        message: SUBSCRIPTION_UNAVAILABLE_MESSAGE,
+      },
+    };
+  }
+
   return {
     company,
   };
@@ -126,6 +179,9 @@ router.get("/company/:slug", async (req, res) => {
         logoUrl: true,
         primaryColor: true,
         status: true,
+        subscriptionStatus: true,
+        subscriptionEnd: true,
+        trialEndsAt: true,
       },
     });
 
@@ -141,7 +197,22 @@ router.get("/company/:slug", async (req, res) => {
       });
     }
 
-    return res.json(company);
+    if (!isCompanySubscriptionAvailable(company)) {
+      return res.status(403).json({
+        message: SUBSCRIPTION_UNAVAILABLE_MESSAGE,
+      });
+    }
+
+    return res.json({
+      id: company.id,
+      name: company.name,
+      slug: company.slug,
+      email: company.email,
+      phone: company.phone,
+      logoUrl: company.logoUrl,
+      primaryColor: company.primaryColor,
+      status: company.status,
+    });
   } catch (error) {
     console.error(error);
 
@@ -530,6 +601,9 @@ router.get("/appointments/:id/cancel/:cancelToken", async (req, res) => {
             status: true,
             logoUrl: true,
             primaryColor: true,
+            subscriptionStatus: true,
+            subscriptionEnd: true,
+            trialEndsAt: true,
           },
         },
         service: true,
@@ -555,7 +629,14 @@ router.get("/appointments/:id/cancel/:cancelToken", async (req, res) => {
         canCancel:
           appointment.status !== "cancelled" &&
           canCancelAppointment(appointment.date, appointment.startTime),
-        company: appointment.company,
+        company: {
+          id: appointment.company.id,
+          name: appointment.company.name,
+          slug: appointment.company.slug,
+          status: appointment.company.status,
+          logoUrl: appointment.company.logoUrl,
+          primaryColor: appointment.company.primaryColor,
+        },
         service: appointment.service,
         professional: appointment.professional,
         client: appointment.client,
@@ -595,6 +676,12 @@ router.post("/appointments/:id/cancel/:cancelToken", async (req, res) => {
     if (appointment.company.status !== "active") {
       return res.status(403).json({
         message: COMPANY_UNAVAILABLE_MESSAGE,
+      });
+    }
+
+    if (!isCompanySubscriptionAvailable(appointment.company)) {
+      return res.status(403).json({
+        message: SUBSCRIPTION_UNAVAILABLE_MESSAGE,
       });
     }
 
