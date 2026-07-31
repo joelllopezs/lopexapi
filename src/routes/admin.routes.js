@@ -76,6 +76,32 @@ function getPlanLimits(plan) {
   return limits[plan] || limits.start;
 }
 
+function addDays(date, days) {
+  const result = new Date(date);
+  result.setDate(result.getDate() + days);
+  return result;
+}
+
+function startOfToday() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today;
+}
+
+function getBaseRenewDate(company) {
+  const today = startOfToday();
+
+  if (company.subscriptionEnd) {
+    const currentEnd = new Date(company.subscriptionEnd);
+
+    if (!Number.isNaN(currentEnd.getTime()) && currentEnd > today) {
+      return currentEnd;
+    }
+  }
+
+  return today;
+}
+
 function parseOptionalDate(value) {
   if (value === undefined) return undefined;
 
@@ -131,6 +157,16 @@ function formatCompanyWithPlan(company) {
       company.subscriptionStatus || "trial"
     ),
   };
+}
+
+async function findCompanyOrFail(id) {
+  const company = await prisma.company.findUnique({
+    where: {
+      id,
+    },
+  });
+
+  return company;
 }
 
 router.get("/plans", async (req, res) => {
@@ -439,11 +475,7 @@ router.patch("/companies/:id/status", async (req, res) => {
       });
     }
 
-    const companyExists = await prisma.company.findUnique({
-      where: {
-        id,
-      },
-    });
+    const companyExists = await findCompanyOrFail(id);
 
     if (!companyExists) {
       return res.status(404).json({
@@ -573,11 +605,7 @@ router.patch("/companies/:id/subscription", async (req, res) => {
       });
     }
 
-    const companyExists = await prisma.company.findUnique({
-      where: {
-        id,
-      },
-    });
+    const companyExists = await findCompanyOrFail(id);
 
     if (!companyExists) {
       return res.status(404).json({
@@ -624,15 +652,247 @@ router.patch("/companies/:id/subscription", async (req, res) => {
   }
 });
 
+router.patch("/companies/:id/subscription/renew", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const days = Number(req.body?.days || 30);
+
+    if (!Number.isInteger(days) || days < 1 || days > 365) {
+      return res.status(400).json({
+        message: "Informe uma quantidade de dias entre 1 e 365.",
+      });
+    }
+
+    const companyExists = await findCompanyOrFail(id);
+
+    if (!companyExists) {
+      return res.status(404).json({
+        message: "Empresa não encontrada.",
+      });
+    }
+
+    const baseDate = getBaseRenewDate(companyExists);
+    const newEndDate = addDays(baseDate, days);
+
+    const company = await prisma.company.update({
+      where: {
+        id,
+      },
+      data: {
+        status: "active",
+        subscriptionStatus: "active",
+        subscriptionStart: companyExists.subscriptionStart || new Date(),
+        subscriptionEnd: newEndDate,
+      },
+      include: buildCompanyInclude(),
+    });
+
+    return res.json({
+      message: `Assinatura renovada por mais ${days} dias com sucesso.`,
+      company: formatCompanyWithPlan(company),
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Erro ao renovar assinatura.",
+      error: error.message,
+    });
+  }
+});
+
+router.patch("/companies/:id/subscription/extend-trial", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const days = Number(req.body?.days || 7);
+
+    if (!Number.isInteger(days) || days < 1 || days > 90) {
+      return res.status(400).json({
+        message: "Informe uma quantidade de dias entre 1 e 90.",
+      });
+    }
+
+    const companyExists = await findCompanyOrFail(id);
+
+    if (!companyExists) {
+      return res.status(404).json({
+        message: "Empresa não encontrada.",
+      });
+    }
+
+    const today = startOfToday();
+    const currentTrialEnd = companyExists.trialEndsAt
+      ? new Date(companyExists.trialEndsAt)
+      : today;
+
+    const baseDate =
+      !Number.isNaN(currentTrialEnd.getTime()) && currentTrialEnd > today
+        ? currentTrialEnd
+        : today;
+
+    const newTrialEnd = addDays(baseDate, days);
+
+    const company = await prisma.company.update({
+      where: {
+        id,
+      },
+      data: {
+        status: "active",
+        subscriptionStatus: "trial",
+        subscriptionStart: companyExists.subscriptionStart || new Date(),
+        subscriptionEnd: newTrialEnd,
+        trialEndsAt: newTrialEnd,
+      },
+      include: buildCompanyInclude(),
+    });
+
+    return res.json({
+      message: `Trial estendido por mais ${days} dias com sucesso.`,
+      company: formatCompanyWithPlan(company),
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Erro ao estender trial.",
+      error: error.message,
+    });
+  }
+});
+
+router.patch("/companies/:id/subscription/mark-active", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const companyExists = await findCompanyOrFail(id);
+
+    if (!companyExists) {
+      return res.status(404).json({
+        message: "Empresa não encontrada.",
+      });
+    }
+
+    const baseDate = getBaseRenewDate(companyExists);
+    const subscriptionEnd = companyExists.subscriptionEnd
+      ? companyExists.subscriptionEnd
+      : addDays(baseDate, 30);
+
+    const company = await prisma.company.update({
+      where: {
+        id,
+      },
+      data: {
+        status: "active",
+        subscriptionStatus: "active",
+        subscriptionStart: companyExists.subscriptionStart || new Date(),
+        subscriptionEnd,
+      },
+      include: buildCompanyInclude(),
+    });
+
+    return res.json({
+      message: "Assinatura marcada como ativa com sucesso.",
+      company: formatCompanyWithPlan(company),
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Erro ao ativar assinatura.",
+      error: error.message,
+    });
+  }
+});
+
+router.patch("/companies/:id/subscription/mark-overdue", async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const companyExists = await findCompanyOrFail(id);
+
+    if (!companyExists) {
+      return res.status(404).json({
+        message: "Empresa não encontrada.",
+      });
+    }
+
+    const company = await prisma.company.update({
+      where: {
+        id,
+      },
+      data: {
+        subscriptionStatus: "overdue",
+      },
+      include: buildCompanyInclude(),
+    });
+
+    return res.json({
+      message: "Assinatura marcada como atrasada com sucesso.",
+      company: formatCompanyWithPlan(company),
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Erro ao marcar assinatura como atrasada.",
+      error: error.message,
+    });
+  }
+});
+
+router.patch("/companies/:id/subscription/reactivate", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const days = Number(req.body?.days || 30);
+
+    if (!Number.isInteger(days) || days < 1 || days > 365) {
+      return res.status(400).json({
+        message: "Informe uma quantidade de dias entre 1 e 365.",
+      });
+    }
+
+    const companyExists = await findCompanyOrFail(id);
+
+    if (!companyExists) {
+      return res.status(404).json({
+        message: "Empresa não encontrada.",
+      });
+    }
+
+    const subscriptionEnd = addDays(startOfToday(), days);
+
+    const company = await prisma.company.update({
+      where: {
+        id,
+      },
+      data: {
+        status: "active",
+        subscriptionStatus: "active",
+        subscriptionStart: new Date(),
+        subscriptionEnd,
+      },
+      include: buildCompanyInclude(),
+    });
+
+    return res.json({
+      message: `Empresa reativada com assinatura ativa por ${days} dias.`,
+      company: formatCompanyWithPlan(company),
+    });
+  } catch (error) {
+    console.error(error);
+
+    return res.status(500).json({
+      message: "Erro ao reativar empresa.",
+      error: error.message,
+    });
+  }
+});
+
 router.patch("/companies/:id/activate", async (req, res) => {
   try {
     const { id } = req.params;
 
-    const companyExists = await prisma.company.findUnique({
-      where: {
-        id,
-      },
-    });
+    const companyExists = await findCompanyOrFail(id);
 
     if (!companyExists) {
       return res.status(404).json({
@@ -667,11 +927,7 @@ router.patch("/companies/:id/block", async (req, res) => {
   try {
     const { id } = req.params;
 
-    const companyExists = await prisma.company.findUnique({
-      where: {
-        id,
-      },
-    });
+    const companyExists = await findCompanyOrFail(id);
 
     if (!companyExists) {
       return res.status(404).json({
